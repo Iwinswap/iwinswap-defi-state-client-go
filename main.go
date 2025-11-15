@@ -79,11 +79,13 @@ func main() {
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
 	defer signal.Stop(sigChan)
 
-	select {
-	case sig := <-sigChan:
-		logger.Info("received signal, shutting down", "signal", sig.String())
-	case <-client.View():
-		// drain the view channel
+	for {
+		select {
+		case sig := <-sigChan:
+			logger.Info("received signal, shutting down", "signal", sig.String())
+			return
+		case <-client.View():
+			// drain the view channel
+		}
 	}
-
 }
