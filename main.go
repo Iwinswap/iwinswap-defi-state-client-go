@@ -73,16 +73,17 @@ func main() {
 		logger.Error("failed to create defi state client", "err", err)
 		os.Exit(1)
 	}
-	_ = client // TODO: use client
 
 	// --- signal handling / graceful shutdown ---
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
 	defer signal.Stop(sigChan)
 
-	sig := <-sigChan
-	logger.Info("received signal, shutting down", "signal", sig.String())
+	select {
+	case sig := <-sigChan:
+		logger.Info("received signal, shutting down", "signal", sig.String())
+	case <-client.View():
+		// drain the view channel
+	}
 
-	// let any goroutines using ctx notice the cancellation
-	cancel()
 }
