@@ -13,7 +13,7 @@ To run the client, you only need to provide the URL of your DeFi State Engine.
 ### Installation
 
 1. Clone the client repo:
-    `go get [github.com/Iwinswap/iwinswap-defi-state-client-go](https://github.com/Iwinswap/iwinswap-defi-state-client-go)`
+    `git clone https://github.com/Iwinswap/iwinswap-defi-state-client-go`
 
 2. Install dependencies:
     `go mod tidy`
@@ -23,18 +23,8 @@ To run the client, you only need to provide the URL of your DeFi State Engine.
 
 You can build the application or run it directly. The only required argument is the -state-engine-url.
 
-**Build and Run:**
-`# Build the binary
-go build -o defi-state-client
-
-# Run the client, passing your engine's URL
-./defi-state-client -state-engine-url wss://your-state-engine-endpoint.com
-`
-
-**Run directly**
 `go run main.go -state-engine-url wss://your-state-engine-endpoint.com
 `
-
 
 
 
