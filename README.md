@@ -1,9 +1,42 @@
-Iwinswap DeFi State ClientThis Go application serves as a client for the Iwinswap DeFi State Engine. It connects to the engine's JSON-RPC endpoint to receive and process real-time DeFi protocol state updates.The client is pre-configured with all the necessary patchers and copiers to handle state diffs for multiple DeFi protocols, including Uniswap V2, Uniswap V3, and various token/pool systems.🚀 Getting StartedTo run the client, you only need to provide the URL of your DeFi State Engine.PrerequisitesGo (Golang) installed.Access to a running DeFi State Engine JSON-RPC (or WebSocket) endpoint.InstallationEnsure you have the client library in your project:go get [github.com/Iwinswap/iwinswap-defi-state-client-go](https://github.com/Iwinswap/iwinswap-defi-state-client-go)
-Save the code from the prompt as main.go.Install dependencies:go mod tidy
-Running the ClientYou can build the application or run it directly. The only required argument is -state-engine-url.Build and Run:# Build the binary
+# Iwinswap DeFi State Client
+
+This Go application serves as a client for the Iwinswap DeFi State Engine. It connects to the engine's JSON-RPC endpoint to receive and process real-time DeFi protocol state updates.The client is pre-configured with all the necessary patchers and copiers to handle state diffs for multiple DeFi protocols, including Uniswap V2, Uniswap V3, and various token/pool systems.
+
+## Getting Started
+
+To run the client, you only need to provide the URL of your DeFi State Engine.
+
+### Prerequisites
+- Go (Golang) installed.
+- Access to a running DeFi State Engine JSON-RPC (or WebSocket) endpoint.
+
+### Installation
+
+1. Clone the client repo:
+    `go get [github.com/Iwinswap/iwinswap-defi-state-client-go](https://github.com/Iwinswap/iwinswap-defi-state-client-go)`
+
+2. Install dependencies:
+    `go mod tidy`
+
+
+### Running the Client
+
+You can build the application or run it directly. The only required argument is the -state-engine-url.
+
+**Build and Run:**
+`# Build the binary
 go build -o defi-state-client
 
 # Run the client, passing your engine's URL
 ./defi-state-client -state-engine-url wss://your-state-engine-endpoint.com
-Run Directly:go run main.go -state-engine-url wss://your-state-engine-endpoint.com
-Once running, the client will connect to the specified URL. All logs are printed to stdout in JSON format.⚙️ How It WorksThis application is primarily a harness for the iwinswap-defi-state-client-go library.Parse Flag: It reads the required -state-engine-url from the command line.Initialize Patcher: It constructs a DefiStatePatcher. This patcher is configured with all the subsystems it needs to understand, including patchers and "copiers" for:UniswapV2UniswapV3PoolRegistryTokenSystemTokenPoolSystemInitialize Client: It creates a new jsonrpcclient instance. This client is configured with:The state-engine-url.The defistatePatcher.Patch function. This function is passed as a callback.Connect and Listen: The jsonrpcclient.NewClient function establishes the connection. It will (internally) listen for state update messages from the engine. When a message is received, it will automatically pass the state diff to the defistatePatcher.Patch function, which applies the changes.Graceful Shutdown: The application listens for SIGINT (Ctrl+C) or SIGTERM signals. Upon receiving one, it cancels the main context, which gracefully shuts down the client connection and exits.ConfigurationThe client is configured via a single command-line flag.FlagDescriptionRequiredDefault-state-engine-urlThe JSON-RPC or WebSocket URL of the DeFi State Engine.Yes""
+`
+
+**Run directly**
+`go run main.go -state-engine-url wss://your-state-engine-endpoint.com
+`
+
+
+
+
+
+
