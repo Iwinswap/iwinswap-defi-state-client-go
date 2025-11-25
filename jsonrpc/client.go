@@ -247,18 +247,25 @@ func (c *Client) logMetrics(view *types.DefiStateEngineView, clientProcessingDur
 	transportTime := clientStartTime.Sub(serverFinishTime) // T4 - T3
 	totalLatency := clientFinishTime.Sub(blockTimestamp)   // T5 - T1
 
+	protocols := []any{}
+	for protocol, pools := range view.Subsystems.UniswapV2.Data {
+		protocols = append(protocols, string(protocol), len(pools))
+	}
+	for protocol, pools := range view.Subsystems.UniswapV3.Data {
+		protocols = append(protocols, string(protocol), len(pools))
+	}
+
 	logAttrs := []any{
 		"block_number", view.Block.Number,
 		"view_type", viewType,
 		"tokens", len(view.Subsystems.TokenSystem.Data),
 		"pools", len(view.Subsystems.PoolRegistry.Data),
-		"uniswap_v2_pools", len(view.Subsystems.UniswapV2.Data),
-		"uniswap_v3_pools", len(view.Subsystems.UniswapV3.Data),
 		"total_latency_ms", totalLatency.Round(time.Millisecond).Milliseconds(),
 		"transport_ms", transportTime.Round(time.Millisecond).Milliseconds(),
 		"client_processing_ms", clientProcessingDur.Round(time.Microsecond).Milliseconds(),
 		"server_processing_ms", serverFinishTime.Sub(time.Unix(0, int64(view.Block.ReceivedAt))).Milliseconds(),
 	}
 
+	logAttrs = append(logAttrs, protocols...)
 	c.logger.Info("Received new state view", logAttrs...)
 }
