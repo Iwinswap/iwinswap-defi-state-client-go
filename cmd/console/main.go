@@ -456,7 +456,7 @@ func findPoolsByToken(state *engine.State, reader *bufio.Reader) {
 	}
 
 	// 5. Print Results (Improved with Tabwriter)
-	header(fmt.Sprintf("POOLS FOR %s", tokenSymbol))
+	header(fmt.Sprintf("pools for %s", tokenSymbol))
 
 	w := tabwriter.NewWriter(os.Stdout, 0, 0, 4, ' ', 0)
 	fmt.Fprintln(w, "ID\tPROTOCOL\tPOOL ADDRESS\t")
@@ -516,12 +516,11 @@ func watchPool(safeState *SafeState, reader *bufio.Reader) {
 			if state == nil || state.Block.Number == nil {
 				continue
 			}
-
 			if state.Block.Number.Cmp(lastBlock) > 0 {
 				lastBlock.Set(state.Block.Number)
 
 				fmt.Print("\033[H\033[2J")
-				fmt.Printf(Bold+"--- LIVE MONITOR (Block: %s) ---\n"+Reset, state.Block.Number.String())
+				fmt.Printf(Bold+"\n--- LIVE MONITOR (Block: %s) ---\n"+Reset, state.Block.Number.String())
 				fmt.Println(Gray + "Press ENTER to return to menu." + Reset)
 
 				printPoolByKey(state, *key)
@@ -584,7 +583,7 @@ func printPoolByKey(state *engine.State, searchKey [32]byte) {
 	}
 
 	if foundPool != nil {
-		header("POOL REGISTRY DATA")
+		header("pool registry data")
 		fmt.Printf("Registry ID:     %d\n", foundPool.ID)
 		fmt.Printf("Pool Key:        0x%x\n", hex.EncodeToString(foundPool.Key[:]))
 
@@ -616,7 +615,7 @@ func inspectProtocolData(state *engine.State, pID engine.ProtocolID, poolID uint
 		pools := uniswapv2.NewIndexableUniswapV2System(pState.Data.([]uniswapv2.PoolView))
 		pool, found := pools.GetByID(poolID)
 		if found {
-			header("UNISWAP V2 LIVE DATA")
+			header(string(pID) + " pool data")
 			printField("Reserve0", pool.Reserve0)
 			printField("Reserve1", pool.Reserve1)
 		} else {
@@ -627,7 +626,7 @@ func inspectProtocolData(state *engine.State, pID engine.ProtocolID, poolID uint
 		pools := uniswapv3.NewIndexableUniswapV3System(pState.Data.([]uniswapv3.PoolView))
 		pool, found := pools.GetByID(poolID)
 		if found {
-			header("UNISWAP V3 LIVE DATA")
+			header(string(pID) + " pool data")
 			printField("Liquidity", pool.Liquidity)
 			printField("SqrtPriceX96", pool.SqrtPriceX96)
 			printField("Current Tick", fmt.Sprintf("%s%d%s", Yellow, pool.Tick, Reset))
