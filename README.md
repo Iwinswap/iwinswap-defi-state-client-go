@@ -46,16 +46,3 @@ There are two ways to run this repository:
 
 
 
-## Architecture
-
-The client operates on a "Protocol ID -> Schema -> Typed Data" philosophy.
-
-    - Pool Registry: Maps every Pool Address to a unique uint64 ID.
-
-    - Token System: Maps Tokens to IDs and metadata.
-
-    - Token-Pool Graph: A pre-computed, traversable graph connecting Tokens to Pools.
-
-    - Live Protocols: Normalized state (Ticks, Reserves) synchronized to the latest block.
-
-For a deeper dive into the architecture, run the console and press h (Help).
