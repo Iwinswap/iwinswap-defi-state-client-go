@@ -13,7 +13,8 @@ This SDK provides a high-performance entry point to the DeFI State Stream. It al
 - Go: Version 1.25.4 or higher.
 
 ## Installation
-```git clone https://github.com/defistate/defi-state-client-go
+```
+git clone https://github.com/defistate/defi-state-client-go
 
 cd defi-state-client-go
 ```
@@ -42,6 +43,8 @@ There are two ways to run this repository:
     Use this to stream data directly to your application logic or logs (good for background services).
 
     `go run cmd/client/main.go -config=config.yaml`
+
+
 
 ## Architecture
 
