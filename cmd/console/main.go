@@ -237,9 +237,9 @@ func printHelp() {
 	fmt.Print("\033[H\033[2J")
 
 	header("DEFI STATE STREAM ARCHITECTURE")
-	fmt.Println(Bold + "Concept: Aggregated State" + Reset)
-	fmt.Println("The DeFi State Stream is a normalized, real-time aggregation of multiple DeFi protocols.")
-	fmt.Println("It abstracts the complexity of raw blockchain storage into a clean, typed Go structure.")
+	fmt.Println(Bold + "Concept: Block-Synchronized Aggregation" + Reset)
+	fmt.Println("Defistate provides a block-synchronized stream, aggregated across protocols")
+	fmt.Println("and optimized for real-time consumption.")
 	fmt.Println("")
 
 	fmt.Println(Bold + "1. THE DATA STRUCTURE" + Reset)
@@ -272,7 +272,7 @@ func printHelp() {
 
 	fmt.Println(Bold + "3. DEFI PROTOCOLS" + Reset)
 	fmt.Println("   (e.g., Uniswap V2, V3, Curve)")
-	fmt.Println("   These protocols provide high-frequency market data (Reserves, Ticks, Liquidity).")
+	fmt.Println("   These protocols provide protocol-specific state (Reserves, Ticks, Liquidity).")
 	fmt.Println("   They are indexed from the blockchain and guaranteed in-sync with the Block.")
 	fmt.Println("")
 
