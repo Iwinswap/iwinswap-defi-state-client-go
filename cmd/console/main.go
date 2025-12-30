@@ -343,7 +343,9 @@ func findPoolsByToken(state *engine.State, reader *bufio.Reader) {
 	}
 
 	// 1. Parse Input
-	searchAddrBytes, err := hex.DecodeString(input)
+	var searchAddrBytes []byte
+	var err error
+	searchAddrBytes, err = hex.DecodeString(input)
 	if err != nil {
 		fmt.Printf(Red+"[ERROR] Invalid hex format: %v%s\n", err, Reset)
 		return
@@ -355,9 +357,7 @@ func findPoolsByToken(state *engine.State, reader *bufio.Reader) {
 		fmt.Println(Red + "[ERROR] 'token-system' missing." + Reset)
 		return
 	}
-	// Note: We use tokenregistry.TokenRegistryView if available, but casting to the slice works
-	// if your engine unmarshals directly to []token.TokenView.
-	// Assuming []token.TokenView based on your provided snippets.
+	// Cast to []token.TokenView
 	tokens, ok := tokenProto.Data.([]token.TokenView)
 	if !ok {
 		fmt.Printf(Red+"[ERROR] Bad Token Data Type: %T%s\n", tokenProto.Data, Reset)
@@ -365,7 +365,7 @@ func findPoolsByToken(state *engine.State, reader *bufio.Reader) {
 	}
 
 	var searchTokenID uint64
-	var searchTokenSymbol string
+	var searchToken token.TokenView
 	foundToken := false
 
 	// Build a Symbol Map for fast lookup of Paired Tokens later
@@ -375,7 +375,7 @@ func findPoolsByToken(state *engine.State, reader *bufio.Reader) {
 		tokenSymbolMap[t.ID] = t.Symbol
 		if !foundToken && bytes.Equal(t.Address[:], searchAddrBytes) {
 			searchTokenID = t.ID
-			searchTokenSymbol = t.Symbol
+			searchToken = t
 			foundToken = true
 		}
 	}
@@ -384,7 +384,14 @@ func findPoolsByToken(state *engine.State, reader *bufio.Reader) {
 		fmt.Println(Red + "[NOT FOUND] Token address not found in registry." + Reset)
 		return
 	}
-	fmt.Printf("%sFound Token: %s (ID: %d)%s\n", Green, searchTokenSymbol, searchTokenID, Reset)
+
+	// Print Detailed Token Info
+	header("TOKEN DETAILS")
+	fmt.Printf(" %s%-10s%s %d\n", Gray, "ID:", Reset, searchToken.ID)
+	fmt.Printf(" %s%-10s%s %s\n", Gray, "Symbol:", Reset, searchToken.Symbol)
+	fmt.Printf(" %s%-10s%s %s\n", Gray, "Name:", Reset, searchToken.Name)
+	fmt.Printf(" %s%-10s%s %d\n", Gray, "Decimals:", Reset, searchToken.Decimals)
+	fmt.Printf(" %s%-10s%s 0x%x\n", Gray, "Address:", Reset, searchToken.Address)
 
 	// 3. Query Graph: TokenID -> [PoolID: PairedTokenID]
 	graphProto, ok := state.Protocols[engine.ProtocolID("token-pool-graph-system")]
@@ -393,16 +400,11 @@ func findPoolsByToken(state *engine.State, reader *bufio.Reader) {
 		return
 	}
 
-	// Corrected: Uses tokenpoolsregistry package
+	// Uses poolregistry for TokenPoolsRegistryView as per your structure
 	graphView, ok := graphProto.Data.(*poolregistry.TokenPoolsRegistryView)
 	if !ok {
-		// Fallback for value type
-		if val, ok := graphProto.Data.(poolregistry.TokenPoolsRegistryView); ok {
-			graphView = &val
-		} else {
-			fmt.Printf(Red+"[ERROR] Bad Graph Data Type: %T%s\n", graphProto.Data, Reset)
-			return
-		}
+		fmt.Printf(Red+"[ERROR] Bad Graph Data Type: %T%s\n", graphProto.Data, Reset)
+		return
 	}
 
 	// Find token index in graph
@@ -454,7 +456,7 @@ func findPoolsByToken(state *engine.State, reader *bufio.Reader) {
 		return
 	}
 
-	fmt.Printf("Found %d active pools for %s. Resolving details...\n", len(poolPairs), searchTokenSymbol)
+	fmt.Printf("\nFound %d active pools. Resolving details...\n", len(poolPairs))
 
 	// 4. Resolve PoolID -> Details (Pool Registry)
 	poolProto, ok := state.Protocols[engine.ProtocolID("pool-system")]
@@ -473,7 +475,7 @@ func findPoolsByToken(state *engine.State, reader *bufio.Reader) {
 	}
 
 	// 5. Print Results
-	header(fmt.Sprintf("POOLS FOR %s", searchTokenSymbol))
+	header(fmt.Sprintf("POOLS FOR %s", searchToken.Symbol))
 
 	w := tabwriter.NewWriter(os.Stdout, 0, 0, 4, ' ', 0)
 	fmt.Fprintln(w, "ID\tPROTOCOL\tPAIRED TOKEN\tPOOL ADDRESS\t")
@@ -490,7 +492,7 @@ func findPoolsByToken(state *engine.State, reader *bufio.Reader) {
 				}
 			}
 
-			// B. Resolve Paired Token Symbol
+			// B. Resolve Paired Token Symbol (Using the ID we found in the Graph)
 			pairSymbol, ok := tokenSymbolMap[pairedTokenID]
 			if !ok {
 				pairSymbol = fmt.Sprintf("ID:%d", pairedTokenID)
@@ -605,7 +607,7 @@ func printPoolByKey(state *engine.State, searchKey [32]byte) {
 	}
 
 	if foundPool != nil {
-		header("pool registry data")
+		header("POOL-SYSTEM")
 		fmt.Printf("Registry ID:     %d\n", foundPool.ID)
 		fmt.Printf("Pool Key:        0x%x\n", hex.EncodeToString(foundPool.Key[:]))
 
@@ -637,7 +639,7 @@ func inspectProtocolData(state *engine.State, pID engine.ProtocolID, poolID uint
 		pools := uniswapv2.NewIndexableUniswapV2System(pState.Data.([]uniswapv2.PoolView))
 		pool, found := pools.GetByID(poolID)
 		if found {
-			header(string(pID) + " pool data")
+			header(strings.ToUpper(string(pID) + " pool data"))
 			printField("Reserve0", pool.Reserve0)
 			printField("Reserve1", pool.Reserve1)
 		} else {
@@ -648,7 +650,7 @@ func inspectProtocolData(state *engine.State, pID engine.ProtocolID, poolID uint
 		pools := uniswapv3.NewIndexableUniswapV3System(pState.Data.([]uniswapv3.PoolView))
 		pool, found := pools.GetByID(poolID)
 		if found {
-			header(string(pID) + " pool data")
+			header(strings.ToUpper(string(pID) + " pool data"))
 			printField("Liquidity", pool.Liquidity)
 			printField("SqrtPriceX96", pool.SqrtPriceX96)
 			printField("Current Tick", fmt.Sprintf("%s%d%s", Yellow, pool.Tick, Reset))
