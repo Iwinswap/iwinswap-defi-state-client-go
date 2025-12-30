@@ -343,10 +343,7 @@ func findPoolsByToken(state *engine.State, reader *bufio.Reader) {
 	}
 
 	// 1. Parse Input
-	var searchAddrBytes []byte
-
-	var err error
-	searchAddrBytes, err = hex.DecodeString(input)
+	searchAddrBytes, err := hex.DecodeString(input)
 	if err != nil {
 		fmt.Printf(Red+"[ERROR] Invalid hex format: %v%s\n", err, Reset)
 		return
@@ -358,23 +355,28 @@ func findPoolsByToken(state *engine.State, reader *bufio.Reader) {
 		fmt.Println(Red + "[ERROR] 'token-system' missing." + Reset)
 		return
 	}
+	// Note: We use tokenregistry.TokenRegistryView if available, but casting to the slice works
+	// if your engine unmarshals directly to []token.TokenView.
+	// Assuming []token.TokenView based on your provided snippets.
 	tokens, ok := tokenProto.Data.([]token.TokenView)
 	if !ok {
 		fmt.Printf(Red+"[ERROR] Bad Token Data Type: %T%s\n", tokenProto.Data, Reset)
 		return
 	}
 
-	var tokenID uint64
-	var tokenSymbol string
+	var searchTokenID uint64
+	var searchTokenSymbol string
 	foundToken := false
 
-	// Linear scan (Optimization: build a map in production)
+	// Build a Symbol Map for fast lookup of Paired Tokens later
+	tokenSymbolMap := make(map[uint64]string)
+
 	for _, t := range tokens {
-		if bytes.Equal(t.Address[:], searchAddrBytes) {
-			tokenID = t.ID
-			tokenSymbol = t.Symbol
+		tokenSymbolMap[t.ID] = t.Symbol
+		if !foundToken && bytes.Equal(t.Address[:], searchAddrBytes) {
+			searchTokenID = t.ID
+			searchTokenSymbol = t.Symbol
 			foundToken = true
-			break
 		}
 	}
 
@@ -382,17 +384,19 @@ func findPoolsByToken(state *engine.State, reader *bufio.Reader) {
 		fmt.Println(Red + "[NOT FOUND] Token address not found in registry." + Reset)
 		return
 	}
-	fmt.Printf("%sFound Token: %s (ID: %d)%s\n", Green, tokenSymbol, tokenID, Reset)
+	fmt.Printf("%sFound Token: %s (ID: %d)%s\n", Green, searchTokenSymbol, searchTokenID, Reset)
 
-	// 3. Query Graph: TokenID -> []PoolID
+	// 3. Query Graph: TokenID -> [PoolID: PairedTokenID]
 	graphProto, ok := state.Protocols[engine.ProtocolID("token-pool-graph-system")]
 	if !ok {
 		fmt.Println(Red + "[ERROR] 'token-pool-graph-system' missing." + Reset)
 		return
 	}
 
+	// Corrected: Uses tokenpoolsregistry package
 	graphView, ok := graphProto.Data.(*poolregistry.TokenPoolsRegistryView)
 	if !ok {
+		// Fallback for value type
 		if val, ok := graphProto.Data.(poolregistry.TokenPoolsRegistryView); ok {
 			graphView = &val
 		} else {
@@ -404,7 +408,7 @@ func findPoolsByToken(state *engine.State, reader *bufio.Reader) {
 	// Find token index in graph
 	tokenIndex := -1
 	for i, id := range graphView.Tokens {
-		if id == tokenID {
+		if id == searchTokenID {
 			tokenIndex = i
 			break
 		}
@@ -415,29 +419,42 @@ func findPoolsByToken(state *engine.State, reader *bufio.Reader) {
 		return
 	}
 
-	// Traverse Adjacency
-	uniquePools := make(map[uint64]struct{})
+	// Traverse Adjacency & Capture Paired Token
+	// Map: PoolID -> PairedTokenID
+	poolPairs := make(map[uint64]uint64)
+
 	if tokenIndex < len(graphView.Adjacency) {
 		edgeIndices := graphView.Adjacency[tokenIndex]
 		for _, edgeIndex := range edgeIndices {
-			if edgeIndex < len(graphView.EdgePools) {
-				poolIndices := graphView.EdgePools[edgeIndex]
-				for _, poolIndex := range poolIndices {
-					if poolIndex < len(graphView.Pools) {
-						pID := graphView.Pools[poolIndex]
-						uniquePools[pID] = struct{}{}
-					}
+			// Safety checks
+			if edgeIndex >= len(graphView.EdgeTargets) || edgeIndex >= len(graphView.EdgePools) {
+				continue
+			}
+
+			// A. Identify the Paired Token for this Edge
+			targetTokenIndex := graphView.EdgeTargets[edgeIndex]
+			if targetTokenIndex >= len(graphView.Tokens) {
+				continue
+			}
+			pairedTokenID := graphView.Tokens[targetTokenIndex]
+
+			// B. Collect all pools on this Edge
+			poolIndices := graphView.EdgePools[edgeIndex]
+			for _, poolIndex := range poolIndices {
+				if poolIndex < len(graphView.Pools) {
+					pID := graphView.Pools[poolIndex]
+					poolPairs[pID] = pairedTokenID
 				}
 			}
 		}
 	}
 
-	if len(uniquePools) == 0 {
+	if len(poolPairs) == 0 {
 		fmt.Println(Yellow + "[INFO] No active pools found for this token." + Reset)
 		return
 	}
 
-	fmt.Printf("Found %d active pools for %s. Resolving details...\n", len(uniquePools), tokenSymbol)
+	fmt.Printf("Found %d active pools for %s. Resolving details...\n", len(poolPairs), searchTokenSymbol)
 
 	// 4. Resolve PoolID -> Details (Pool Registry)
 	poolProto, ok := state.Protocols[engine.ProtocolID("pool-system")]
@@ -449,40 +466,45 @@ func findPoolsByToken(state *engine.State, reader *bufio.Reader) {
 		return
 	}
 
-	// Build lookup map
-	registryMap := make(map[uint64]poolregistry.PoolView)
+	// Build lookup map for pools
+	poolMap := make(map[uint64]poolregistry.PoolView)
 	for _, p := range poolReg.Pools {
-		registryMap[p.ID] = p
+		poolMap[p.ID] = p
 	}
 
-	// 5. Print Results (Improved with Tabwriter)
-	header(fmt.Sprintf("pools for %s", tokenSymbol))
+	// 5. Print Results
+	header(fmt.Sprintf("POOLS FOR %s", searchTokenSymbol))
 
 	w := tabwriter.NewWriter(os.Stdout, 0, 0, 4, ' ', 0)
-	fmt.Fprintln(w, "ID\tPROTOCOL\tPOOL ADDRESS\t")
-	fmt.Fprintln(w, "--\t--------\t------------\t")
+	fmt.Fprintln(w, "ID\tPROTOCOL\tPAIRED TOKEN\tPOOL ADDRESS\t")
+	fmt.Fprintln(w, "--\t--------\t------------\t------------\t")
 
-	for pID := range uniquePools {
-		pool, exists := registryMap[pID]
-
-		idStr := fmt.Sprintf("%d", pID)
-		protoName := fmt.Sprintf("%s???%s", Red, Reset)
-		addrStr := "<Missing>"
-
-		if exists {
+	for pID, pairedTokenID := range poolPairs {
+		if pool, exists := poolMap[pID]; exists {
+			// A. Resolve Protocol Name
+			protoName := "Unknown"
 			if name, ok := poolReg.Protocols[pool.Protocol]; ok {
 				protoName = string(name)
-				if len(protoName) > 25 {
-					protoName = protoName[:22] + "..."
+				if len(protoName) > 22 {
+					protoName = protoName[:19] + "..."
 				}
 			}
-			addr, _ := pool.Key.ToAddress()
-			addrStr = fmt.Sprintf("0x%x", addr)
+
+			// B. Resolve Paired Token Symbol
+			pairSymbol, ok := tokenSymbolMap[pairedTokenID]
+			if !ok {
+				pairSymbol = fmt.Sprintf("ID:%d", pairedTokenID)
+			}
+
+			// C. Address
+			poolAddr, _ := pool.Key.ToAddress()
+			addrStr := fmt.Sprintf("0x%x", poolAddr)
+
+			fmt.Fprintf(w, "%d\t%s\t%s\t%s\t\n", pID, protoName, pairSymbol, addrStr)
+		} else {
+			fmt.Fprintf(w, "%d\t%s???%s\t???\t<Missing>\t\n", pID, Red, Reset)
 		}
-
-		fmt.Fprintf(w, "%s\t%s\t%s\t\n", idStr, protoName, addrStr)
 	}
-
 	w.Flush()
 }
 
