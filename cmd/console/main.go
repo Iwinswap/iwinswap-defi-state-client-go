@@ -22,6 +22,7 @@ import (
 	"github.com/defistate/defi-state-client-go/cmd/client/config"
 	"github.com/defistate/defi-state-client-go/differ"
 	"github.com/defistate/defi-state-client-go/engine"
+	"github.com/defistate/defi-state-client-go/graph" // Imported Graph Package
 	"github.com/defistate/defi-state-client-go/pkg/chains"
 	ethpkg "github.com/defistate/defi-state-client-go/pkg/chains/ethereum"
 	"github.com/defistate/defi-state-client-go/protocols/poolregistry"
@@ -195,6 +196,7 @@ func printMenu() {
 	fmt.Printf(" %s3.%s Find Pool  %s(by Address/Key)%s\n", Cyan, Reset, Gray, Reset)
 	fmt.Printf(" %s4.%s Find Pools %s(by Token Address)%s\n", Cyan, Reset, Gray, Reset)
 	fmt.Printf(" %s5.%s Watch Pool %s(Live Monitor)%s\n", Cyan, Reset, Gray, Reset)
+	fmt.Printf(" %s6.%s Route      %s(Algo Router)%s\n", Cyan, Reset, Gray, Reset)
 	fmt.Println(Gray + "-----------------------------------" + Reset)
 	fmt.Printf(" %sh.%s Help / Architecture\n", Yellow, Reset)
 	fmt.Printf(" %sq.%s Quit\n", Red, Reset)
@@ -221,6 +223,8 @@ func handleCommand(input string, safeState *SafeState, reader *bufio.Reader) {
 		findPoolsByToken(state, reader)
 	case "5":
 		watchPool(safeState, reader)
+	case "6":
+		findRoute(state, reader) // NEW
 	case "h":
 		printHelp()
 	case "q":
@@ -247,15 +251,8 @@ func printHelp() {
 	fmt.Println("   - " + Yellow + "Block" + Reset + ": Essential context (Number, Timestamp, Gas).")
 	fmt.Println("   - " + Yellow + "Protocols" + Reset + ": A map of Protocol IDs to their specific state.")
 	fmt.Println("")
-	fmt.Println("   Inside each Protocol State:")
-	fmt.Println("   - " + Yellow + "Schema" + Reset + ": The decode contract (e.g., 'defistate/uniswap-v2-system@v1').")
-	fmt.Println("   - " + Yellow + "Data" + Reset + ":   Already typed Go objects. You use the Schema to assert")
-	fmt.Println("             the correct type (e.g., casting `any` to `UniswapV3Pool`).")
-	fmt.Println("")
 
-	fmt.Println(Bold + "2. THE THREE PRIMITIVES" + Reset)
-	fmt.Println("   These internal protocols provide the backbone of the entire stream:")
-	fmt.Println("")
+	fmt.Println(Bold + "2. THE PRIMITIVES" + Reset)
 	fmt.Printf("   A. %sPool Registry%s\n", Cyan, Reset)
 	fmt.Println("      - Assigns a unique " + Green + "uint64 ID" + Reset + " to every protocol's pool.")
 	fmt.Println("      - Maps this ID to a " + Green + "32-byte Key" + Reset + " (holding the Address or Identifier).")
@@ -403,8 +400,13 @@ func findPoolsByToken(state *engine.State, reader *bufio.Reader) {
 	// Uses poolregistry for TokenPoolsRegistryView as per your structure
 	graphView, ok := graphProto.Data.(*poolregistry.TokenPoolsRegistryView)
 	if !ok {
-		fmt.Printf(Red+"[ERROR] Bad Graph Data Type: %T%s\n", graphProto.Data, Reset)
-		return
+		// Try by value just in case
+		if val, ok := graphProto.Data.(poolregistry.TokenPoolsRegistryView); ok {
+			graphView = &val
+		} else {
+			fmt.Printf(Red+"[ERROR] Bad Graph Data Type: %T%s\n", graphProto.Data, Reset)
+			return
+		}
 	}
 
 	// Find token index in graph
@@ -475,7 +477,7 @@ func findPoolsByToken(state *engine.State, reader *bufio.Reader) {
 	}
 
 	// 5. Print Results
-	header(fmt.Sprintf("POOLS FOR %s", searchToken.Symbol))
+	header(strings.ToUpper(fmt.Sprintf("POOLS FOR %s", searchToken.Symbol)))
 
 	w := tabwriter.NewWriter(os.Stdout, 0, 0, 4, ' ', 0)
 	fmt.Fprintln(w, "ID\tPROTOCOL\tPAIRED TOKEN\tPOOL ADDRESS\t")
@@ -540,6 +542,7 @@ func watchPool(safeState *SafeState, reader *bufio.Reader) {
 			if state == nil || state.Block.Number == nil {
 				continue
 			}
+
 			if state.Block.Number.Cmp(lastBlock) > 0 {
 				lastBlock.Set(state.Block.Number)
 
@@ -551,6 +554,206 @@ func watchPool(safeState *SafeState, reader *bufio.Reader) {
 			}
 		}
 	}
+}
+
+func findRoute(state *engine.State, reader *bufio.Reader) {
+	header("ROUTE FINDER")
+
+	// 1. Input Token
+	fmt.Print(Bold + "1. Enter Input Token Address: " + Reset)
+	tokenIn, err := readAndValidateToken(state, reader)
+	if err != nil {
+		fmt.Println(Red + err.Error() + Reset)
+		return
+	}
+	fmt.Printf("%s   Selected Input: %s (%d decimals)%s\n", Green, tokenIn.Symbol, tokenIn.Decimals, Reset)
+
+	// 2. Output Token
+	fmt.Print(Bold + "2. Enter Output Token Address: " + Reset)
+	tokenOut, err := readAndValidateToken(state, reader)
+	if err != nil {
+		fmt.Println(Red + err.Error() + Reset)
+		return
+	}
+	fmt.Printf("%s   Selected Output: %s (%d decimals)%s\n", Green, tokenOut.Symbol, tokenOut.Decimals, Reset)
+
+	// 3. Amount
+	fmt.Print(Bold + "3. Enter Input Amount (e.g. 1.5): " + Reset)
+	amountInput, _ := reader.ReadString('\n')
+	amountInput = strings.TrimSpace(amountInput)
+	amountFloat, ok := new(big.Float).SetString(amountInput)
+	if !ok {
+		fmt.Println(Red + "Invalid amount format." + Reset)
+		return
+	}
+
+	// Scale Amount: raw = input * 10^decimals
+	decimals := new(big.Int).Exp(big.NewInt(10), big.NewInt(int64(tokenIn.Decimals)), nil)
+	decimalsFloat := new(big.Float).SetInt(decimals)
+	rawAmount := new(big.Float).Mul(amountFloat, decimalsFloat)
+	rawInt, _ := rawAmount.Int(nil)
+
+	fmt.Printf("\nRouting %s %s (Raw: %s)... calculating best path...\n", amountInput, tokenIn.Symbol, rawInt.String())
+
+	// --- 4. GRAPH INITIALIZATION & ROUTING ---
+
+	// A. Get Graph Data (for topology)
+	graphProto, ok := state.Protocols[engine.ProtocolID("token-pool-graph-system")]
+	if !ok {
+		fmt.Println(Red + "[ERROR] Graph protocol missing." + Reset)
+		return
+	}
+	// Cast to correct type required by NewGraph (defined in graph package, likely poolregistry.TokenPoolsRegistryView)
+	tokenPoolsView, ok := graphProto.Data.(*poolregistry.TokenPoolsRegistryView)
+	if !ok {
+		// Fallback for value type
+		if val, ok := graphProto.Data.(poolregistry.TokenPoolsRegistryView); ok {
+			tokenPoolsView = &val
+		} else {
+			fmt.Printf(Red+"[ERROR] Bad Graph Data Type: %T%s\n", graphProto.Data, Reset)
+			return
+		}
+	}
+
+	// B. Get Pool Registry (for protocol lookups)
+	poolProto, ok := state.Protocols[engine.ProtocolID("pool-system")]
+	if !ok {
+		fmt.Println(Red + "[ERROR] Pool registry missing." + Reset)
+		return
+	}
+	poolRegView, ok := poolProto.Data.(poolregistry.PoolRegistryView)
+	if !ok {
+		fmt.Println(Red + "[ERROR] Invalid pool registry type." + Reset)
+		return
+	}
+
+	tokenProto, ok := state.Protocols[engine.ProtocolID("token-system")]
+	if !ok {
+		fmt.Println("token-system missing")
+		return
+	}
+	tokens, ok := tokenProto.Data.([]token.TokenView)
+	if !ok {
+		fmt.Println("bad token data")
+		return
+	}
+
+	// C. Create Graph Engine (Using imports provided)
+	g, err := graph.NewGraph(tokenPoolsView, tokens, poolRegView, state.Protocols)
+	if err != nil {
+		fmt.Printf(Red+"[ERROR] Failed to initialize graph: %v%s\n", err, Reset)
+		return
+	}
+
+	// D. Run Algorithm (3 runs for Bellman-Ford variants is usually enough for 1-2 hops)
+	paths, amountOut, err := g.FindBestSwapPath(tokenIn.ID, tokenOut.ID, rawInt, 3)
+	if err != nil {
+		fmt.Printf(Red+"[ERROR] Pathfinding failed: %v%s\n", err, Reset)
+		return
+	}
+
+	if len(paths) == 0 {
+		fmt.Println(Yellow + "No profitable path found." + Reset)
+		return
+	}
+
+	// 5. Output Result
+	printRouteResult(paths, amountOut, tokenIn, tokenOut, poolRegView, tokens)
+}
+
+func printRouteResult(paths []graph.TokenPoolPath, amountOut *big.Int, tokenIn, tokenOut *token.TokenView, poolReg poolregistry.PoolRegistryView, allTokens []token.TokenView) {
+	header("BEST ROUTE FOUND")
+
+	// Convert output amount to decimal format
+	decimals := new(big.Int).Exp(big.NewInt(10), big.NewInt(int64(tokenOut.Decimals)), nil)
+	outFloat := new(big.Float).SetInt(amountOut)
+	decFloat := new(big.Float).SetInt(decimals)
+	humanOut := new(big.Float).Quo(outFloat, decFloat)
+
+	fmt.Printf("%sEst. Output:%s %s %s (Raw: %s)\n\n", Bold, Reset, humanOut.Text('f', 4), tokenOut.Symbol, amountOut.String())
+
+	// Build Token Symbol Map for intermediate lookups
+	// (Efficiency note: Ideally this map is passed in, but building it here is fine for a CLI command)
+	tokenMap := make(map[uint64]string)
+	for _, t := range allTokens {
+		tokenMap[t.ID] = t.Symbol
+	}
+
+	fmt.Println(Bold + "Route Path:" + Reset)
+	for i, p := range paths {
+		// Resolve Symbols
+		symIn := tokenMap[p.TokenInID]
+		symOut := tokenMap[p.TokenOutID]
+		if symIn == "" {
+			symIn = fmt.Sprintf("ID:%d", p.TokenInID)
+		}
+		if symOut == "" {
+			symOut = fmt.Sprintf("ID:%d", p.TokenOutID)
+		}
+
+		// Resolve Pool Info
+		poolDesc := "Unknown Pool"
+		poolAddr := "???"
+
+		// Linear lookup in pool registry (fast enough for CLI)
+		for _, pool := range poolReg.Pools {
+			if pool.ID == p.PoolID {
+				if name, ok := poolReg.Protocols[pool.Protocol]; ok {
+					poolDesc = string(name)
+					// Clean up protocol name for display
+					if len(poolDesc) > 20 {
+						poolDesc = poolDesc[:17] + "..."
+					}
+				}
+				addr, _ := pool.Key.ToAddress()
+				poolAddr = fmt.Sprintf("0x%x", addr)
+				break
+			}
+		}
+
+		// VISUAL DISPLAY
+		// Step N: [ Symbol In ]
+		//            |
+		//            +---[ Pool Info ]---> [ Symbol Out ]
+		fmt.Printf(" [ Step %d ]\n", i+1)
+		fmt.Printf("  %s%-6s%s\n", Cyan, symIn, Reset)
+		fmt.Printf("    %s|%s\n", Gray, Reset)
+		fmt.Printf("    %s+---[%s%s %s]--->%s  %s%-6s%s\n",
+			Gray,
+			Reset, poolDesc, poolAddr,
+			Reset,
+			Cyan, symOut, Reset)
+		fmt.Println("")
+	}
+}
+
+func readAndValidateToken(state *engine.State, reader *bufio.Reader) (*token.TokenView, error) {
+	input, _ := reader.ReadString('\n')
+	input = strings.TrimPrefix(strings.TrimSpace(input), "0x")
+	if input == "" {
+		return nil, fmt.Errorf("empty input")
+	}
+
+	addrBytes, err := hex.DecodeString(input)
+	if err != nil {
+		return nil, fmt.Errorf("invalid hex: %v", err)
+	}
+
+	tokenProto, ok := state.Protocols[engine.ProtocolID("token-system")]
+	if !ok {
+		return nil, fmt.Errorf("token-system missing")
+	}
+	tokens, ok := tokenProto.Data.([]token.TokenView)
+	if !ok {
+		return nil, fmt.Errorf("bad token data")
+	}
+
+	for _, t := range tokens {
+		if bytes.Equal(t.Address[:], addrBytes) {
+			return &t, nil
+		}
+	}
+	return nil, fmt.Errorf("token address not found in registry")
 }
 
 // --- HELPERS ---
@@ -607,15 +810,15 @@ func printPoolByKey(state *engine.State, searchKey [32]byte) {
 	}
 
 	if foundPool != nil {
-		header("POOL-SYSTEM")
-		fmt.Printf("Registry ID:     %d\n", foundPool.ID)
-		fmt.Printf("Pool Key:        0x%x\n", hex.EncodeToString(foundPool.Key[:]))
+		header("POOL REGISTRY MATCH")
+		fmt.Printf("Registry ID:     %d\n", foundPool.ID)
+		fmt.Printf("Pool Key:        0x%x\n", hex.EncodeToString(foundPool.Key[:]))
 
 		if protocolID, exists := registry.Protocols[foundPool.Protocol]; exists {
-			fmt.Printf("Protocol:        %s%s%s (ID: %d)\n", Cyan, protocolID, Reset, foundPool.Protocol)
+			fmt.Printf("Protocol:        %s%s%s (ID: %d)\n", Cyan, protocolID, Reset, foundPool.Protocol)
 			inspectProtocolData(state, protocolID, foundPool.ID)
 		} else {
-			fmt.Printf("Protocol:        %sUnknown%s (ID: %d)\n", Red, Reset, foundPool.Protocol)
+			fmt.Printf("Protocol:        %sUnknown%s (ID: %d)\n", Red, Reset, foundPool.Protocol)
 		}
 	} else {
 		fmt.Println(Red + "[NOT FOUND] Pool key not found in registry." + Reset)
@@ -639,7 +842,7 @@ func inspectProtocolData(state *engine.State, pID engine.ProtocolID, poolID uint
 		pools := uniswapv2.NewIndexableUniswapV2System(pState.Data.([]uniswapv2.PoolView))
 		pool, found := pools.GetByID(poolID)
 		if found {
-			header(strings.ToUpper(string(pID) + " pool data"))
+			header(strings.ToUpper(string(pID) + " data"))
 			printField("Reserve0", pool.Reserve0)
 			printField("Reserve1", pool.Reserve1)
 		} else {
@@ -650,7 +853,7 @@ func inspectProtocolData(state *engine.State, pID engine.ProtocolID, poolID uint
 		pools := uniswapv3.NewIndexableUniswapV3System(pState.Data.([]uniswapv3.PoolView))
 		pool, found := pools.GetByID(poolID)
 		if found {
-			header(strings.ToUpper(string(pID) + " pool data"))
+			header(strings.ToUpper(string(pID) + " data"))
 			printField("Liquidity", pool.Liquidity)
 			printField("SqrtPriceX96", pool.SqrtPriceX96)
 			printField("Current Tick", fmt.Sprintf("%s%d%s", Yellow, pool.Tick, Reset))
