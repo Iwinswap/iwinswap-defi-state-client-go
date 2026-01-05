@@ -797,9 +797,9 @@ func printPoolByKey(state *engine.State, searchKey [32]byte) {
 	}
 
 	var foundPool *poolregistry.PoolView
-	for _, pool := range registry.Pools {
-		if pool.Key == searchKey {
-			foundPool = &pool
+	for i := range registry.Pools {
+		if registry.Pools[i].Key == searchKey {
+			foundPool = &registry.Pools[i]
 			break
 		}
 	}
@@ -827,16 +827,23 @@ func inspectProtocolData(state *engine.State, pID engine.ProtocolID, poolID uint
 		return
 	}
 
-	// Helper for aligned printing
 	printField := func(key string, value any) {
-		fmt.Printf("  %s%-15s%s %v\n", Gray, key+":", Reset, value)
+		fmt.Printf("  %s%-15s%s %v\n", Gray, key+":", Reset, value)
 	}
 
 	switch pState.Schema {
 	case uniswapv2.UniswapV2ProtocolSchema:
-		pools := uniswapv2.NewIndexableUniswapV2System(pState.Data.([]uniswapv2.PoolView))
-		pool, found := pools.GetByID(poolID)
-		if found {
+		// OPTIMIZATION: Direct linear scan on slice instead of expensive map build
+		data := pState.Data.([]uniswapv2.PoolView)
+		var pool *uniswapv2.PoolView
+		for i := range data {
+			if data[i].ID == poolID {
+				pool = &data[i]
+				break
+			}
+		}
+
+		if pool != nil {
 			header(strings.ToUpper(string(pID) + " data"))
 			printField("Reserve0", pool.Reserve0)
 			printField("Reserve1", pool.Reserve1)
@@ -845,9 +852,17 @@ func inspectProtocolData(state *engine.State, pID engine.ProtocolID, poolID uint
 		}
 
 	case uniswapv3.UniswapV3ProtocolSchema:
-		pools := uniswapv3.NewIndexableUniswapV3System(pState.Data.([]uniswapv3.PoolView))
-		pool, found := pools.GetByID(poolID)
-		if found {
+		// OPTIMIZATION: Direct linear scan
+		data := pState.Data.([]uniswapv3.PoolView)
+		var pool *uniswapv3.PoolView
+		for i := range data {
+			if data[i].ID == poolID {
+				pool = &data[i]
+				break
+			}
+		}
+
+		if pool != nil {
 			header(strings.ToUpper(string(pID) + " data"))
 			printField("Liquidity", pool.Liquidity)
 			printField("SqrtPriceX96", pool.SqrtPriceX96)
