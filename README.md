@@ -2,7 +2,7 @@
 
 ### The public repository for Defistate's Stream clients and interactive CLI tools.
 
-Defistate provides a block-synchronized stream, aggregated across protocols and optimized for real-time consumption. We handle the complexity of DeFi data so you can focus on building..
+Defistate provides a block-synchronized stream, aggregated across protocols and optimized for real-time consumption. We handle the complexity of DeFi data so you can focus on building.
 
 
 ## Key Features
