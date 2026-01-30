@@ -655,6 +655,10 @@ func (g *Graph) findArbitragePath(
 		maxAmountOut.SetUint64(0)
 
 		for _, poolIndex := range g.rawGraph.EdgePools[edgeIndex] {
+			// ignore pools currently in path
+			if poolInPath(currentPath, g.rawGraph.Pools[poolIndex]) {
+				continue
+			}
 			getAmountOut := getAmountOutFuncs[poolIndex]
 			// can be nil if pool is not part of active set
 			if getAmountOut == nil {
@@ -893,4 +897,12 @@ func equalTokenPoolPaths(a, b []chains.TokenPoolPath) bool {
 		}
 	}
 	return true
+}
+func poolInPath(path []chains.TokenPoolPath, pool uint64) bool {
+	for _, p := range path {
+		if p.PoolID == pool {
+			return true
+		}
+	}
+	return false
 }

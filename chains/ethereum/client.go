@@ -121,6 +121,42 @@ func Dial(
 	return p, nil
 }
 
+func FromStream(
+	ctx context.Context,
+	stream chains.Client,
+	logger chains.Logger,
+	prometheusRegistry prometheus.Registerer,
+	opts ...Option,
+) (*Client, error) {
+	tokenPoolGrapher, err := grapher.NewGrapher()
+	if err != nil {
+		return nil, fmt.Errorf("failed to create grapher: %w", err)
+	}
+
+	p := &Client{
+		stream:              stream,
+		logger:              logger,
+		stateCh:             make(chan *State, 100),
+		errCh:               make(chan error, 1),
+		tokenIndexer:        tokenregistryindexer.New(),
+		poolRegistryIndexer: poolregistryindexer.New(),
+		tokenPoolGrapher:    tokenPoolGrapher,
+		uniswapV2Indexer:    uniswapv2indexer.New(),
+		uniswapV3Indexer:    uniswapv3indexer.New(),
+	}
+	for _, opt := range opts {
+		opt.apply(p)
+	}
+
+	// Bind the Client's lifecycle to the user-provided context
+	p.ctx = ctx
+	p.wg.Add(1)
+	go p.loop()
+
+	p.logger.Info("Client started")
+	return p, nil
+}
+
 // State channel is best-effort; if consumer is slow, updates may be dropped
 func (p *Client) State() <-chan *State {
 	return p.stateCh

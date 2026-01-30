@@ -20,6 +20,7 @@ import (
 	uniswapv2indexer "github.com/defistate/defistate-client-go/protocols/uniswapv2/indexer"
 	uniswapv3 "github.com/defistate/defistate-client-go/protocols/uniswapv3"
 	uniswapv3indexer "github.com/defistate/defistate-client-go/protocols/uniswapv3/indexer"
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -327,4 +328,52 @@ func TestOptions(t *testing.T) {
 	assert.Same(t, mockUniswapV2Idx, c.uniswapV2Indexer, "WithUniswapV2Indexer should set uniswapV2Indexer")
 	assert.Same(t, mockUniswapV3Idx, c.uniswapV3Indexer, "WithUniswapV3Indexer should set uniswapV3Indexer")
 	assert.Same(t, mockGrapher, c.tokenPoolGrapher, "WithTokenPoolGrapher should set tokenPoolGrapher")
+}
+
+func TestClient_FromStream(t *testing.T) {
+	// Setup Mocks
+	transport := newMockTransport()
+	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
+	reg := prometheus.NewRegistry()
+
+	// 1. Initialize via FromStream
+	// We use context.WithCancel so we can stop the client's internal loop later
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	client, err := FromStream(ctx, transport, logger, reg)
+	assert.NoError(t, err)
+	assert.NotNil(t, client)
+
+	// 2. Prepare mock data
+	rawState := &engine.State{
+		Block: engine.BlockSummary{Number: big.NewInt(500)},
+		Protocols: map[engine.ProtocolID]engine.ProtocolState{
+			"tokens":   {Schema: tokenregistry.Schema, Data: []tokenregistry.Token{}},
+			"registry": {Schema: poolregistry.Schema, Data: poolregistry.PoolRegistry{}},
+			"graph":    {Schema: tokenpoolregistry.Schema, Data: &tokenpoolregistry.TokenPoolRegistryView{}},
+		},
+	}
+
+	// 3. Push data into the transport
+	transport.stateCh <- rawState
+
+	// 4. Verify the client (which is now running its loop) processes it
+	select {
+	case processed := <-client.State():
+		assert.Equal(t, int64(500), processed.Block.Number.Int64())
+	case <-time.After(1 * time.Second):
+		t.Fatal("FromStream client failed to process state within timeout")
+	}
+
+	// 5. Verify manual shutdown via context
+	cancel()
+
+	// Wait for the loop to terminate and close channels
+	select {
+	case _, ok := <-client.State():
+		assert.False(t, ok, "State channel should close when context is cancelled")
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("FromStream client loop did not exit on context cancellation")
+	}
 }
